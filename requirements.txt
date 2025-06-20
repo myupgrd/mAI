@@ -3,6 +3,6 @@ aiohttp
 qdrant-client
 PyPDF2
 tiktoken
-openai
+openai>=1.0.0
 uvicorn
 python-multipart
