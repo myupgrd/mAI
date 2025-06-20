@@ -168,3 +168,24 @@ def health():
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
+from fastapi import Request
+
+@app.post("/telegram")
+async def telegram_webhook(request: Request):
+    data = await request.json()
+    if "message" in data and "text" in data["message"]:
+        user_text = data["message"]["text"]
+        chat_id = data["message"]["chat"]["id"]
+        user_id = str(data["message"]["from"]["id"])
+
+        reply = await handle_user_prompt(user_text, user_id)
+
+        await send_telegram_message(chat_id, reply)
+
+    return {"ok": True}
+
+
+async def send_telegram_message(chat_id, text):
+    telegram_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    async with aiohttp.ClientSession() as session:
+        await session.post(telegram_url, json={"chat_id": chat_id, "text": text})
