@@ -1,8 +1,8 @@
 fastapi
 uvicorn
 aiohttp
-openai>=1.0.0
-qdrant-client
-python-multipart
-PyPDF2
 python-dotenv
+qdrant-client
+openai
+supabase==1.0.3
+python-multipart
