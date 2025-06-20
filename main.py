@@ -6,62 +6,54 @@ from qdrant_client import AsyncQdrantClient
 from qdrant_client.models import PointStruct
 from PyPDF2 import PdfReader
 from uuid import uuid4
-import openai
 import tiktoken
+from openai import AsyncOpenAI
 
-print("🚀 Starting MyUpgrd RAG Chatbot...")
+# ✅ Initialize OpenAI client
+client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
+# ✅ Initialize FastAPI app
 app = FastAPI()
 
-# Enable CORS
+# ✅ Enable CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Change to ["https://myupgrd.com"] in production
+    allow_origins=["*"],  # Use ["https://myupgrd.com"] in production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-print("✅ CORS middleware enabled")
 
-# Load environment variables
+# ✅ Environment vars
 QDRANT_URL = os.getenv("QDRANT_URL")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 COLLECTION_NAME = "rag_docs"
 
-# Validate env vars
-if not all([QDRANT_URL, QDRANT_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY]):
-    raise ValueError("❌ One or more required environment variables are missing.")
-
-# Set up Qdrant and OpenAI
+# ✅ Qdrant setup
 qdrant_client = AsyncQdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
-openai.api_key = OPENAI_API_KEY
-print("✅ Connected to Qdrant and OpenAI")
 
-# Health check
+# ✅ Health check
 @app.get("/health")
 async def health():
     return {"status": "online"}
 
-# Embedding function
+# ✅ Embedding function (new SDK)
 async def get_embedding(text):
-    response = await openai.Embedding.acreate(
-        input=[text],
-        model="text-embedding-ada-002"
+    response = await client.embeddings.create(
+        model="text-embedding-ada-002",
+        input=[text]
     )
-    return response['data'][0]['embedding']
+    return response.data[0].embedding
 
-# Upload and process PDF
+# ✅ Upload PDF and split into embeddings
 @app.post("/upload")
 async def upload_pdf(file: UploadFile = File(...)):
-    contents = await file.read()
     reader = PdfReader(file.file)
     raw_text = ""
     for page in reader.pages:
         raw_text += page.extract_text() or ""
 
-    # Tokenize
     tokenizer = tiktoken.get_encoding("cl100k_base")
     tokens = tokenizer.encode(raw_text)
     chunks = [tokens[i:i + 500] for i in range(0, len(tokens), 500)]
@@ -76,7 +68,7 @@ async def upload_pdf(file: UploadFile = File(...)):
 
     return {"status": "success", "chunks": len(chunks)}
 
-# Main chat route
+# ✅ Chat endpoint with RAG and OpenRouter call
 @app.post("/chat")
 async def chat(req: Request):
     try:
@@ -86,7 +78,7 @@ async def chat(req: Request):
         # Get question embedding
         question_embedding = await get_embedding(question)
 
-        # Query Qdrant
+        # Query Qdrant for context
         search_result = await qdrant_client.search(
             collection_name=COLLECTION_NAME,
             query_vector=question_embedding,
@@ -99,10 +91,9 @@ async def chat(req: Request):
 
         return {"reply": reply}
     except Exception as e:
-        print("❌ Chat error:", str(e))
         return {"reply": f"Error occurred: {str(e)}"}
 
-# Talk to OpenRouter (GPT-3.5)
+# ✅ OpenRouter GPT-3.5 response handler
 async def chat_with_openrouter(prompt):
     async with aiohttp.ClientSession() as session:
         headers = {
