@@ -1,8 +1,10 @@
 fastapi
-uvicorn[standard]
+uvicorn
 aiohttp
 python-multipart
 PyMuPDF
 openai
 qdrant-client
 python-dotenv
+PyPDF2
+tiktoken
