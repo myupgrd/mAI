@@ -3,15 +3,17 @@ import aiohttp
 from fastapi import FastAPI, UploadFile, File, Request
 from fastapi.middleware.cors import CORSMiddleware
 from qdrant_client import AsyncQdrantClient
-from qdrant_client.models import PointStruct, VectorParams, Distance
+from qdrant_client.models import PointStruct
 from PyPDF2 import PdfReader
 from uuid import uuid4
 import openai
 import tiktoken
 
+print("🚀 Starting MyUpgrd RAG Chatbot...")
+
 app = FastAPI()
 
-# CORS for local dev & your website
+# Enable CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # Change to ["https://myupgrd.com"] in production
@@ -19,24 +21,30 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+print("✅ CORS middleware enabled")
 
-# Qdrant client config
+# Load environment variables
 QDRANT_URL = os.getenv("QDRANT_URL")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-
-qdrant_client = AsyncQdrantClient(
-    url=QDRANT_URL,
-    api_key=QDRANT_API_KEY,
-)
-
-openai.api_key = OPENAI_API_KEY
-
 COLLECTION_NAME = "rag_docs"
 
-# --------------- Embedding Function ------------------
+# Validate env vars
+if not all([QDRANT_URL, QDRANT_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY]):
+    raise ValueError("❌ One or more required environment variables are missing.")
 
+# Set up Qdrant and OpenAI
+qdrant_client = AsyncQdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
+openai.api_key = OPENAI_API_KEY
+print("✅ Connected to Qdrant and OpenAI")
+
+# Health check
+@app.get("/health")
+async def health():
+    return {"status": "online"}
+
+# Embedding function
 async def get_embedding(text):
     response = await openai.Embedding.acreate(
         input=[text],
@@ -44,17 +52,16 @@ async def get_embedding(text):
     )
     return response['data'][0]['embedding']
 
-# --------------- Upload Endpoint ------------------
-
+# Upload and process PDF
 @app.post("/upload")
 async def upload_pdf(file: UploadFile = File(...)):
     contents = await file.read()
     reader = PdfReader(file.file)
     raw_text = ""
     for page in reader.pages:
-        raw_text += page.extract_text()
+        raw_text += page.extract_text() or ""
 
-    # Split into ~500-token chunks
+    # Tokenize
     tokenizer = tiktoken.get_encoding("cl100k_base")
     tokens = tokenizer.encode(raw_text)
     chunks = [tokens[i:i + 500] for i in range(0, len(tokens), 500)]
@@ -69,35 +76,33 @@ async def upload_pdf(file: UploadFile = File(...)):
 
     return {"status": "success", "chunks": len(chunks)}
 
-# --------------- Chat Endpoint ------------------
-
+# Main chat route
 @app.post("/chat")
 async def chat(req: Request):
     try:
         data = await req.json()
         question = data.get("message", "")
 
-        # Get embedding for question
+        # Get question embedding
         question_embedding = await get_embedding(question)
 
-        # Search top 3 similar chunks
+        # Query Qdrant
         search_result = await qdrant_client.search(
             collection_name=COLLECTION_NAME,
             query_vector=question_embedding,
             limit=3
         )
-
         context = "\n".join([hit.payload["text"] for hit in search_result])
 
-        full_prompt = f"Answer the question based on the context:\n\n{context}\n\nQuestion: {question}"
+        prompt = f"Answer the question based on the context:\n\n{context}\n\nQuestion: {question}"
+        reply = await chat_with_openrouter(prompt)
 
-        reply = await chat_with_openrouter(full_prompt)
         return {"reply": reply}
     except Exception as e:
+        print("❌ Chat error:", str(e))
         return {"reply": f"Error occurred: {str(e)}"}
 
-# --------------- OpenRouter Chat Function ------------------
-
+# Talk to OpenRouter (GPT-3.5)
 async def chat_with_openrouter(prompt):
     async with aiohttp.ClientSession() as session:
         headers = {
@@ -118,56 +123,7 @@ async def chat_with_openrouter(prompt):
             data = await resp.json()
 
             if "choices" not in data:
-                print("OpenRouter Error:", data)
+                print("❌ OpenRouter Error:", data)
                 return f"Error from OpenRouter: {data.get('error', 'unknown error')}"
 
             return data["choices"][0]["message"]["content"]
-
-import os
-import aiohttp
-from fastapi import FastAPI, UploadFile, File, Request
-from fastapi.middleware.cors import CORSMiddleware
-from qdrant_client import AsyncQdrantClient
-from qdrant_client.models import PointStruct, VectorParams, Distance
-from PyPDF2 import PdfReader
-from uuid import uuid4
-import openai
-import tiktoken
-
-print("Starting app...")
-
-app = FastAPI()
-
-# CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-print("CORS middleware added.")
-
-# Load environment variables
-QDRANT_URL = os.getenv("QDRANT_URL")
-QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-
-print("Loaded environment variables.")
-
-# Validate they exist
-if not all([QDRANT_URL, QDRANT_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY]):
-    raise ValueError("❌ One or more environment variables are missing!")
-
-# Connect to Qdrant
-qdrant_client = AsyncQdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
-print("✅ Connected to Qdrant.")
-
-openai.api_key = OPENAI_API_KEY
-
-# Add a test route
-@app.get("/health")
-async def health():
-    return {"status": "online"}
