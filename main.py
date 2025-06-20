@@ -1,5 +1,5 @@
 from fastapi import FastAPI, Request, UploadFile, File
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse
 from pydantic import BaseModel
 import uvicorn
 import os
@@ -81,11 +81,14 @@ async def chat_with_openrouter(prompt):
 
 @app.post("/chat")
 async def chat(msg: ChatMessage):
-    related_chunks = await search_qdrant(msg.message)
-    context = "\n".join(related_chunks)
-    full_prompt = f"Use the following context to answer the question.\n\nContext:\n{context}\n\nQuestion: {msg.message}"
-    reply = await chat_with_openrouter(full_prompt)
-    return JSONResponse(content={"reply": reply})
+    try:
+        related_chunks = await search_qdrant(msg.message)
+        context = "\n".join(related_chunks)
+        full_prompt = f"Use the following context to answer the question.\n\nContext:\n{context}\n\nQuestion: {msg.message}"
+        reply = await chat_with_openrouter(full_prompt)
+        return JSONResponse(content={"reply": reply})
+    except Exception as e:
+        return JSONResponse(content={"reply": f"Error occurred: {str(e)}"})
 
 @app.post("/webhook")
 async def telegram_webhook(req: Request):
@@ -102,11 +105,6 @@ async def telegram_webhook(req: Request):
     async with aiohttp.ClientSession() as session:
         await session.post(telegram_url, json={"chat_id": chat_id, "text": reply})
     return {"status": "replied"}
-
-if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
-
-from fastapi.responses import HTMLResponse
 
 @app.get("/chat", response_class=HTMLResponse)
 async def chat_widget():
@@ -174,3 +172,6 @@ async def chat_widget():
     </body>
     </html>
     """
+
+if __name__ == "__main__":
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
