@@ -40,17 +40,30 @@ async def embed_texts(texts):
 
 @app.post("/upload")
 async def upload_doc(file: UploadFile = File(...)):
-    contents = await file.read()
-    doc = fitz.open(stream=contents, filetype="pdf")
-    full_text = "".join(page.get_text() for page in doc)
-    chunks = chunk_text(full_text)
-    vectors = await embed_texts(chunks)
-    points = [
-        PointStruct(id=str(uuid.uuid4()), vector=vector, payload={"text": chunk})
-        for chunk, vector in zip(chunks, vectors)
-    ]
-    await qdrant_client.upsert(collection_name=COLLECTION_NAME, points=points)
-    return {"status": "success", "chunks": len(chunks)}
+    try:
+        contents = await file.read()
+
+        if not contents or len(contents) < 10:
+            return {"status": "failed", "error": "Empty or invalid file."}
+
+        doc = fitz.open(stream=contents, filetype="pdf")
+        full_text = "".join(page.get_text() for page in doc)
+
+        if not full_text.strip():
+            return {"status": "failed", "error": "PDF had no readable text."}
+
+        chunks = chunk_text(full_text)
+        vectors = await embed_texts(chunks)
+
+        points = [
+            PointStruct(id=str(uuid.uuid4()), vector=vector, payload={"text": chunk})
+            for chunk, vector in zip(chunks, vectors)
+        ]
+
+        await qdrant_client.upsert(collection_name=COLLECTION_NAME, points=points)
+        return {"status": "success", "chunks": len(chunks)}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 async def search_qdrant(query: str):
     embedded = await embed_texts([query])
