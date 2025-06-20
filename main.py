@@ -22,7 +22,7 @@ QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
 SUPABASE_URL = os.getenv("SUPABASE_URL_MAI")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY_MAI")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-BOT_USERNAME = "myupgrd_bot"  # Replace with your actual bot username
+BOT_USERNAME = "myupgrd_Bot"  # Replace with your actual bot username
 
 # Initialize clients
 client = AsyncOpenAI(api_key=OPENAI_API_KEY)
