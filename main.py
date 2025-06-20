@@ -38,10 +38,23 @@ async def embed_texts(texts):
     )
     return [e.embedding for e in response.data]
 
+@app.get("/test-create-rag-docs")
+async def test_create():
+    try:
+        await qdrant_client.create_collection(
+            collection_name=COLLECTION_NAME,
+            vectors_config=VectorParams(
+                size=1536,
+                distance=Distance.COSINE
+            )
+        )
+        return {"status": "rag_docs created manually"}
+    except Exception as e:
+        return {"error": str(e)}
+
 @app.post("/upload")
 async def upload_doc(file: UploadFile = File(...)):
     try:
-        # Ensure collection exists
         existing = await qdrant_client.get_collections()
         if COLLECTION_NAME not in [c.name for c in existing.collections]:
             await qdrant_client.create_collection(
