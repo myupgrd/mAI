@@ -122,3 +122,52 @@ async def chat_with_openrouter(prompt):
                 return f"Error from OpenRouter: {data.get('error', 'unknown error')}"
 
             return data["choices"][0]["message"]["content"]
+
+import os
+import aiohttp
+from fastapi import FastAPI, UploadFile, File, Request
+from fastapi.middleware.cors import CORSMiddleware
+from qdrant_client import AsyncQdrantClient
+from qdrant_client.models import PointStruct, VectorParams, Distance
+from PyPDF2 import PdfReader
+from uuid import uuid4
+import openai
+import tiktoken
+
+print("Starting app...")
+
+app = FastAPI()
+
+# CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+print("CORS middleware added.")
+
+# Load environment variables
+QDRANT_URL = os.getenv("QDRANT_URL")
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+
+print("Loaded environment variables.")
+
+# Validate they exist
+if not all([QDRANT_URL, QDRANT_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY]):
+    raise ValueError("❌ One or more environment variables are missing!")
+
+# Connect to Qdrant
+qdrant_client = AsyncQdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
+print("✅ Connected to Qdrant.")
+
+openai.api_key = OPENAI_API_KEY
+
+# Add a test route
+@app.get("/health")
+async def health():
+    return {"status": "online"}
