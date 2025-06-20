@@ -1,8 +1,8 @@
 fastapi
-aiohttp
-qdrant-client
-PyPDF2
-tiktoken
-openai>=1.0.0
 uvicorn
+aiohttp
+openai>=1.0.0
+qdrant-client
 python-multipart
+PyPDF2
+python-dotenv
