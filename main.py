@@ -105,3 +105,72 @@ async def telegram_webhook(req: Request):
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+
+from fastapi.responses import HTMLResponse
+
+@app.get("/chat", response_class=HTMLResponse)
+async def chat_widget():
+    return """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>myupgrd Assistant</title>
+        <style>
+            body {
+                font-family: Arial, sans-serif;
+                background-color: #f7f7f7;
+                padding: 20px;
+            }
+            #chat-box {
+                border: 1px solid #ccc;
+                border-radius: 10px;
+                padding: 10px;
+                background-color: white;
+                height: 400px;
+                overflow-y: auto;
+                margin-bottom: 10px;
+            }
+            input[type='text'] {
+                width: 80%;
+                padding: 8px;
+                margin-right: 5px;
+            }
+            button {
+                padding: 8px 12px;
+                background-color: #ff006e;
+                color: white;
+                border: none;
+                border-radius: 4px;
+            }
+        </style>
+    </head>
+    <body>
+        <h2>💬 myupgrd Assistant</h2>
+        <div id="chat-box"></div>
+        <input type="text" id="user-input" placeholder="Type your message..." />
+        <button onclick="sendMessage()">Send</button>
+
+        <script>
+            async function sendMessage() {
+                const input = document.getElementById('user-input');
+                const message = input.value;
+                if (!message) return;
+
+                const chatBox = document.getElementById('chat-box');
+                chatBox.innerHTML += '<div><b>You:</b> ' + message + '</div>';
+                input.value = '';
+
+                const response = await fetch('/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: message, source: 'web' })
+                });
+
+                const data = await response.json();
+                chatBox.innerHTML += '<div><b>Bot:</b> ' + data.reply + '</div>';
+                chatBox.scrollTop = chatBox.scrollHeight;
+            }
+        </script>
+    </body>
+    </html>
+    """
