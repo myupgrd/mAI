@@ -1,25 +1,33 @@
 import os
 import aiohttp
 import uvicorn
-from fastapi import FastAPI, File, UploadFile
+from fastapi import FastAPI, File, UploadFile, Request
 from fastapi.middleware.cors import CORSMiddleware
 from openai import AsyncOpenAI
 from qdrant_client import QdrantClient
 from qdrant_client.models import PointStruct, Distance, VectorParams, CollectionStatus
+from supabase import create_client, Client
 from uuid import uuid4
 from PyPDF2 import PdfReader
+from datetime import datetime
 from dotenv import load_dotenv
 
 load_dotenv()
 
+# Load environment variables
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 QDRANT_URL = os.getenv("QDRANT_URL")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
+SUPABASE_URL = os.getenv("SUPABASE_URL_MAI")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY_MAI")
+
+# Initialize clients
+client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+qdrant = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 app = FastAPI()
-client = AsyncOpenAI(api_key=OPENROUTER_API_KEY)
-qdrant = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
-
 COLLECTION_NAME = "rag_docs"
 
 app.add_middleware(
@@ -30,7 +38,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Create collection if not exists
+# Ensure Qdrant collection exists
 try:
     if not qdrant.get_collection(COLLECTION_NAME).status == CollectionStatus.GREEN:
         qdrant.recreate_collection(
@@ -43,7 +51,7 @@ except Exception:
         vectors_config=VectorParams(size=1536, distance=Distance.COSINE)
     )
 
-# Get embedding for text
+# Get OpenAI embedding
 async def get_embedding(text):
     response = await client.embeddings.create(
         input=[text],
@@ -51,33 +59,45 @@ async def get_embedding(text):
     )
     return response.data[0].embedding
 
-# RAG Chat with OpenRouter
-async def chat_with_openrouter(prompt):
-    # Search context from Qdrant
-    embedded = await get_embedding(prompt)
-    hits = qdrant.search(
-        collection_name=COLLECTION_NAME,
-        query_vector=embedded,
-        limit=3
-    )
+# Get previous chat history for memory
+def get_chat_history(user_id, limit=5):
+    try:
+        response = supabase.table("chat_logs") \
+            .select("message,response") \
+            .eq("user_id", user_id) \
+            .order("timestamp", desc=True) \
+            .limit(limit) \
+            .execute()
 
+        history = response.data or []
+        messages = []
+        for entry in reversed(history):
+            messages.append({"role": "user", "content": entry["message"]})
+            messages.append({"role": "assistant", "content": entry["response"]})
+        return messages
+    except Exception as e:
+        print("Supabase retrieval error:", e)
+        return []
+
+# Chat endpoint with memory and logging
+async def chat_with_openrouter(prompt, user_id):
+    embedded = await get_embedding(prompt)
+    hits = qdrant.search(collection_name=COLLECTION_NAME, query_vector=embedded, limit=3)
     context = "\n\n".join([hit.payload.get("text", "") for hit in hits])
+
+    memory_messages = get_chat_history(user_id)
 
     messages = [
         {
             "role": "system",
             "content": (
-                "You are mAI — the intelligent, friendly assistant of myupgrd (short for myupgrd Artificial Intelligence). "
-                "You always respond in a human-like, conversational tone that feels fresh, helpful, and professional. "
-                "You adapt your language based on the user's input — you're fluent in all major languages and reply in the language the user uses. "
-                "You're a reliable guide and always ready to help, no matter the topic. "
-                "Whenever possible, provide direct links to the requested pages or resources if you know the path. "
-                "Always aim to be clear, kind, and helpful — like a knowledgeable friend with expert-level understanding. "
-                "You also improve with every conversation by learning what users are asking for, refining your answers to be better each time. "
-                "Your mission is to make every user feel heard, supported, and empowered on their journey with myupgrd.\n\n"
-                f"Context:\n{context}"
+                "You are mAI — the intelligent, friendly assistant of myupgrd (myupgrd Artificial Intelligence). "
+                "You respond in a fresh, professional, human-like tone. You're multilingual and help users navigate, learn, and act. "
+                "If you know a link, provide it directly. Always include useful information, empathy, and clarity.\n\n"
+                f"Context: {context}"
             )
         },
+        *memory_messages,
         {"role": "user", "content": prompt}
     ]
 
@@ -97,18 +117,31 @@ async def chat_with_openrouter(prompt):
             data = await res.json()
             if "choices" not in data:
                 return f"Error occurred: {data}"
-            return data["choices"][0]["message"]["content"]
+            reply = data["choices"][0]["message"]["content"]
 
-# Endpoint: Chat
+            try:
+                supabase.table("chat_logs").insert({
+                    "id": str(uuid4()),
+                    "user_id": user_id,
+                    "message": prompt,
+                    "response": reply,
+                    "timestamp": datetime.utcnow().isoformat()
+                }).execute()
+            except Exception as e:
+                print("Supabase insert error:", e)
+
+            return reply
+
 @app.post("/chat")
-async def chat_endpoint(body: dict):
+async def chat_endpoint(request: Request):
+    body = await request.json()
     prompt = body.get("message", "")
+    user_id = body.get("user_id", "guest")
     if not prompt:
         return {"reply": "No message provided"}
-    reply = await chat_with_openrouter(prompt)
+    reply = await chat_with_openrouter(prompt, user_id)
     return {"reply": reply}
 
-# Endpoint: Upload file and ingest to Qdrant
 @app.post("/upload")
 async def upload(file: UploadFile = File(...)):
     content = ""
@@ -120,7 +153,6 @@ async def upload(file: UploadFile = File(...)):
         content = (await file.read()).decode()
 
     chunks = [content[i:i+1000] for i in range(0, len(content), 1000)]
-
     points = []
     for chunk in chunks:
         embedding = await get_embedding(chunk)
@@ -130,11 +162,9 @@ async def upload(file: UploadFile = File(...)):
     qdrant.upsert(collection_name=COLLECTION_NAME, points=points)
     return {"status": "success", "chunks": len(chunks)}
 
-# Endpoint: Health check
 @app.get("/health")
 def health():
     return {"status": "online"}
 
-# Run with uvicorn when deployed locally
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
