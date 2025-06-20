@@ -22,6 +22,7 @@ QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
 SUPABASE_URL = os.getenv("SUPABASE_URL_MAI")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY_MAI")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+BOT_USERNAME = "myupgrd_bot"  # Replace with your actual bot username
 
 # Initialize clients
 client = AsyncOpenAI(api_key=OPENAI_API_KEY)
@@ -167,24 +168,27 @@ async def upload(file: UploadFile = File(...)):
 def health():
     return {"status": "online"}
 
+@app.post("/telegram")
+async def telegram_webhook(request: Request):
+    data = await request.json()
+
+    if "message" in data and "text" in data["message"]:
+        message = data["message"]
+        user_text = message["text"]
+        chat_id = message["chat"]["id"]
+        user_id = str(message["from"]["id"])
+
+        if message.get("chat", {}).get("type") == "private" or f"@{BOT_USERNAME}" in user_text:
+            cleaned_text = user_text.replace(f"@{BOT_USERNAME}", "").strip()
+            reply = await chat_with_openrouter(cleaned_text, user_id)
+            await send_telegram_message(chat_id, reply)
+
+    return {"ok": True}
+
 async def send_telegram_message(chat_id, text):
     telegram_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     async with aiohttp.ClientSession() as session:
         await session.post(telegram_url, json={"chat_id": chat_id, "text": text})
-
-@app.post("/telegram")
-async def telegram_webhook(request: Request):
-    data = await request.json()
-    if "message" in data and "text" in data["message"]:
-        user_text = data["message"]["text"]
-        chat_id = data["message"]["chat"]["id"]
-        user_id = str(data["message"]["from"]["id"])
-
-        reply = await chat_with_openrouter(user_text, user_id)
-
-        await send_telegram_message(chat_id, reply)
-
-    return {"ok": True}
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
