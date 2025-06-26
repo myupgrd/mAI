@@ -111,7 +111,7 @@ async def chat_with_openrouter(prompt, user_id):
         }
 
         payload = {
-            "model": "gpt-3.5-turbo",
+            "model": "openai/gpt-3.5-turbo",
             "messages": messages
         }
 
