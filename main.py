@@ -11,6 +11,7 @@ from uuid import uuid4
 from PyPDF2 import PdfReader
 from datetime import datetime
 from dotenv import load_dotenv
+from bs4 import BeautifulSoup
 
 load_dotenv()
 
@@ -24,6 +25,12 @@ SUPABASE_KEY = os.getenv("SUPABASE_KEY_MAI")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 BOT_USERNAME = "myupgrd_Bot"  # Replace with your actual bot username
 MY_TELEGRAM_ID = 5828132807  # Telegram ID for @Mr_vanitis
+
+# Static websites to always include in context
+STATIC_CONTEXT_URLS = [
+    "https://myupgrd.com",
+    "https://vato.international",
+]
 
 # Initialize clients
 client = AsyncOpenAI(api_key=OPENAI_API_KEY)
@@ -62,6 +69,19 @@ async def get_embedding(text):
     )
     return response.data[0].embedding
 
+# Read content from URL
+async def extract_text_from_url(url):
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=10) as response:
+                html = await response.text()
+                soup = BeautifulSoup(html, 'html.parser')
+                text = soup.get_text(separator=' ', strip=True)
+                return text[:3000]
+    except Exception as e:
+        print(f"Failed to fetch {url}:", e)
+        return ""
+
 # Get previous chat history for memory
 def get_chat_history(user_id, limit=5):
     try:
@@ -86,9 +106,15 @@ def get_chat_history(user_id, limit=5):
 async def chat_with_openrouter(prompt, user_id):
     embedded = await get_embedding(prompt)
     hits = qdrant.search(collection_name=COLLECTION_NAME, query_vector=embedded, limit=3)
-    context = "\n\n".join([hit.payload.get("text", "") for hit in hits])
-
     memory_messages = get_chat_history(user_id)
+
+    # Fetch static context URLs
+    static_texts = []
+    for url in STATIC_CONTEXT_URLS:
+        page_text = await extract_text_from_url(url)
+        static_texts.append(f"Content from {url}:\n{page_text}")
+
+    context = "\n\n".join([hit.payload.get("text", "") for hit in hits] + static_texts)
 
     messages = [
         {
