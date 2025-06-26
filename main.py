@@ -111,7 +111,7 @@ async def chat_with_openrouter(prompt, user_id):
         }
 
         payload = {
-            "model": "google/gemma-7b-it",
+            "model": "openai/gpt-4o-mini",
             "messages": messages
         }
 
