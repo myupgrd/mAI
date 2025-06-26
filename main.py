@@ -23,6 +23,7 @@ SUPABASE_URL = os.getenv("SUPABASE_URL_MAI")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY_MAI")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 BOT_USERNAME = "myupgrd_Bot"  # Replace with your actual bot username
+MY_TELEGRAM_ID = 5828132807  # Telegram ID for @Mr_vanitis
 
 # Initialize clients
 client = AsyncOpenAI(api_key=OPENAI_API_KEY)
@@ -111,7 +112,7 @@ async def chat_with_openrouter(prompt, user_id):
         }
 
         payload = {
-            "model": "openai/gpt-4o-mini",
+            "model": "google/gemma-7b-it",
             "messages": messages
         }
 
@@ -177,6 +178,14 @@ async def telegram_webhook(request: Request):
         user_text = message["text"]
         chat_id = message["chat"]["id"]
         user_id = str(message["from"]["id"])
+
+        # Notify Markus if someone wants to speak with him
+        trigger_phrases = ["speak with markus", "talk to markus", "dm markus", "founder", "private message"]
+        if any(phrase in user_text.lower() for phrase in trigger_phrases):
+            username = message["from"].get("username", "Unknown")
+            full_name = message["from"].get("first_name", "") + " " + message["from"].get("last_name", "")
+            notice = f"\ud83d\udce9 User @{username} ({full_name.strip()}) wants to speak with you privately."
+            await send_telegram_message(MY_TELEGRAM_ID, notice)
 
         if message.get("chat", {}).get("type") == "private" or f"@{BOT_USERNAME}" in user_text:
             cleaned_text = user_text.replace(f"@{BOT_USERNAME}", "").strip()
